@@ -159,6 +159,140 @@ curl -s -X POST \
 
 ---
 
+### Attachments
+
+Attach supporting docs (PDFs, Word, images, etc.) to a specific bid. All attachment routes are scoped to an opportunity — you must have already created a draft via `POST /bids` for that opportunity first.
+
+Uploads are JSON+base64 (no multipart). Practical file ceiling is **~4.5MB** because Supabase edge functions cap request bodies at 6MB and base64 inflates the payload ~33%. If you need bigger files, open an issue and we'll add a signed-upload-URL flow.
+
+All attachment routes require the `bids:write` scope (same scope as `POST /bids`).
+
+---
+
+#### `POST /bids/:opportunity_id/attachments`
+
+Upload a single attachment to the bid for `:opportunity_id`.
+
+**Request body (JSON):**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `filename` | string | yes | Original filename. Sanitized internally to `[A-Za-z0-9._-]`. |
+| `content_type` | string | yes | MIME type, e.g. `application/pdf`. |
+| `content_base64` | string | yes | File bytes encoded as base64 (no `data:` prefix). |
+| `notes` | string | no | Free text. |
+
+**Example:**
+
+```bash
+# encode a local PDF then upload
+B64=$(base64 -i ./past_performance.pdf)
+curl -s -X POST \
+  -H "Authorization: Bearer bm_pat_xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"filename\": \"past_performance.pdf\",
+    \"content_type\": \"application/pdf\",
+    \"content_base64\": \"$B64\",
+    \"notes\": \"NDR project recap for AlamedaCounty bid\"
+  }" \
+  "https://espejknkeeayjnzyrejw.supabase.co/functions/v1/contractor-api/bids/1f9b07f0-1234-1234-1234-abc.../attachments"
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "8b91ab10-...",
+    "bid_draft_id": "abcd1234-...",
+    "filename": "past_performance.pdf",
+    "content_type": "application/pdf",
+    "size_bytes": 412339,
+    "uploaded_via": "contractor_api",
+    "notes": "NDR project recap for AlamedaCounty bid",
+    "created_at": "2026-06-22T16:14:02.000Z"
+  }
+}
+```
+
+Errors specific to upload:
+- `404` — no bid draft exists for `:opportunity_id`. Call `POST /bids` first.
+- `413` — file too large (decoded bytes exceed 5MB).
+- `400` — `content_base64` is not valid base64 or decoded to zero bytes.
+
+---
+
+#### `GET /bids/:opportunity_id/attachments`
+
+List metadata for all attachments on a bid. No file contents.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "count": 2,
+    "attachments": [
+      {
+        "id": "8b91ab10-...",
+        "filename": "past_performance.pdf",
+        "content_type": "application/pdf",
+        "size_bytes": 412339,
+        "uploaded_via": "contractor_api",
+        "notes": "NDR project recap",
+        "created_at": "2026-06-22T16:14:02.000Z"
+      }
+    ]
+  }
+}
+```
+
+If no bid draft exists yet, returns `{ "ok": true, "data": { "count": 0, "attachments": [] } }` — easier to fan out than a 404.
+
+---
+
+#### `GET /bids/:opportunity_id/attachments/:attachment_id`
+
+Get one attachment plus a **24-hour signed download URL**. The URL is the only way to fetch the file bytes — the bucket is private.
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "8b91ab10-...",
+    "filename": "past_performance.pdf",
+    "content_type": "application/pdf",
+    "size_bytes": 412339,
+    "uploaded_via": "contractor_api",
+    "notes": "NDR project recap",
+    "created_at": "2026-06-22T16:14:02.000Z",
+    "download_url": "https://espejknkeeayjnzyrejw.supabase.co/storage/v1/object/sign/bid-attachments/...",
+    "expires_in_seconds": 86400
+  }
+}
+```
+
+The `download_url` is a vanilla HTTPS link — no auth header needed to fetch it. Re-call this endpoint to mint a fresh URL whenever the old one expires.
+
+---
+
+#### `DELETE /bids/:opportunity_id/attachments/:attachment_id`
+
+Remove an attachment. Deletes both the Storage object and the metadata row. Not reversible.
+
+**Response:**
+
+```json
+{ "ok": true, "data": { "id": "8b91ab10-...", "deleted": true } }
+```
+
+---
+
 ## Errors
 
 All errors come back as `{ "ok": false, "error": "<human-readable message>" }` with an appropriate HTTP status.
