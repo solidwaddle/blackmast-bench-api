@@ -21,12 +21,13 @@ bm_pat_jX3z9Q...
 
 The plaintext is shown to you exactly once when the key is issued. Store it somewhere secure (1Password, env file, etc.) — there's no recovery path. If you lose it, ask for a fresh one.
 
-**Scopes** are attached per key. Today's two scopes:
+**Scopes** are attached per key. Current scopes:
 
 - `opportunities:read` — required for `GET /opportunities*`
-- `bids:write` — required for `POST /bids`
+- `bids:write` — required for `POST /bids` and the bid attachment routes
+- `active_solicitations:read` — required for `GET /active-solicitations*` (the curated go-now lane)
 
-Most contractors get both. If you need something not in your key's scope, request a scope expansion.
+Most contractors get all three. If you need something not in your key's scope, request a scope expansion — no need to rotate your key, we'll just add it.
 
 ---
 
@@ -290,6 +291,99 @@ Remove an attachment. Deletes both the Storage object and the metadata row. Not 
 ```json
 { "ok": true, "data": { "id": "8b91ab10-...", "deleted": true } }
 ```
+
+---
+
+### Active Solicitations
+
+The curated go-now lane. These are solicitations Mario hand-picks as ready-to-bid right now — they live in a separate table from the scraped `/opportunities` pool and are not duplicated across both. Status visibility is enforced server-side: bench contractors only see rows that are `published` (or `closed`, if you opt in).
+
+Both routes require the `active_solicitations:read` scope. Ask for a scope expansion if your key doesn't have it.
+
+---
+
+#### `GET /active-solicitations`
+
+List the open curated lane.
+
+**Query params (all optional):**
+
+| Param | Type | Default | Meaning |
+|---|---|---|---|
+| `limit` | int | 50 | Max rows to return. Cap 200. |
+| `naics` | string | (any) | Exact 6-digit NAICS code filter. |
+| `priority` | `urgent` \| `standard` | (any) | Filter to one priority. |
+| `include_closed` | bool | false | Include solicitations whose status is `closed` (e.g. for post-mortems). |
+| `match` | `mine` \| `all` | `mine` | `mine` filters to solicitations whose NAICS matches your NAICS preferences (exact or 4-digit prefix). `all` returns the full set. |
+
+If your account has no NAICS preferences set, `match=mine` falls through to `all` so you don't get an empty list while you're ramping up.
+
+**Default ordering:** `priority='urgent'` first, then `due_date` ascending, then `published_at` descending.
+
+**Example:**
+
+```bash
+curl -s \
+  -H "Authorization: Bearer bm_pat_xxxxxxxx" \
+  "https://espejknkeeayjnzyrejw.supabase.co/functions/v1/contractor-api/active-solicitations?limit=20&priority=urgent"
+```
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "count": 3,
+    "active_solicitations": [
+      {
+        "id": "a1b2c3d4-...",
+        "title": "Emergency Management Software Platform Services",
+        "agency": "AlamedaCounty, CA",
+        "naics": "541511",
+        "set_aside": null,
+        "notice_type": "RFP",
+        "place": "CA",
+        "due_date": "2026-07-08",
+        "posted_date": "2026-06-22",
+        "source_url": "https://sam.gov/...",
+        "attachments_url": null,
+        "estimated_value_min": 250000,
+        "estimated_value_max": 500000,
+        "priority": "urgent",
+        "status": "published",
+        "published_at": "2026-06-22T18:00:00.000Z",
+        "closed_at": null
+      }
+      // ...
+    ]
+  }
+}
+```
+
+The list payload omits `description` to keep it slim. Use the detail endpoint to get the full body.
+
+---
+
+#### `GET /active-solicitations/:id`
+
+Single curated solicitation, full payload including `description`.
+
+**Path param:** `id` must be a UUID (the `id` field from the list endpoint).
+
+**Returns 404 if:**
+- The id doesn't exist, or
+- The solicitation's status is not `published` or `closed` (drafts are not visible to bench contractors)
+
+**Example:**
+
+```bash
+curl -s \
+  -H "Authorization: Bearer bm_pat_xxxxxxxx" \
+  "https://espejknkeeayjnzyrejw.supabase.co/functions/v1/contractor-api/active-solicitations/a1b2c3d4-..."
+```
+
+**Response shape:** same as a list row, plus `description`.
 
 ---
 
