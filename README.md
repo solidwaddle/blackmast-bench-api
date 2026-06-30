@@ -347,13 +347,23 @@ curl -s \
         "due_date": "2026-07-08",
         "posted_date": "2026-06-22",
         "source_url": "https://sam.gov/...",
-        "attachments_url": null,
         "estimated_value_min": 250000,
         "estimated_value_max": 500000,
         "priority": "urgent",
         "status": "published",
         "published_at": "2026-06-22T18:00:00.000Z",
-        "closed_at": null
+        "closed_at": null,
+        "attachments": [
+          {
+            "id": "f00dcafe-...",
+            "filename": "RFP_SOW.pdf",
+            "content_type": "application/pdf",
+            "size_bytes": 318204,
+            "download_url": "https://espejknkeeayjnzyrejw.supabase.co/storage/v1/object/sign/active-solicitation-files/...",
+            "expires_in_seconds": 3600
+          }
+          // ... more files, in display order
+        ]
       }
       // ...
     ]
@@ -362,6 +372,25 @@ curl -s \
 ```
 
 The list payload omits `description` to keep it slim. Use the detail endpoint to get the full body.
+
+#### Attachments
+
+Curated solicitations can carry supporting files (the SOW, amendments, Q&A, attachments, etc.), uploaded by Mario in the portal. Both `GET /active-solicitations` and `GET /active-solicitations/:id` return an **`attachments`** array on each solicitation, in display order:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | uuid | Attachment id. |
+| `filename` | string | Original filename. |
+| `content_type` | string | MIME type, e.g. `application/pdf`. |
+| `size_bytes` | int | File size. |
+| `download_url` | string | **Signed HTTPS link, valid 1 hour.** No auth header needed to fetch it — the bucket (`active-solicitation-files`) is private. |
+| `expires_in_seconds` | int | Always `3600`. |
+
+Solicitations with no files return `"attachments": []`.
+
+Because `download_url`s expire after **one hour**, treat them as ephemeral: fetch the bytes shortly after the API call, or re-request the solicitation to mint fresh URLs. Don't cache or share the signed URL itself — re-call the endpoint instead.
+
+> **Breaking change (2026-06-30):** the old `attachments_url` field (a single nullable string, previously always `null`) has been **removed**. Replace any reference to `attachments_url` with the `attachments[]` array above.
 
 ---
 
@@ -383,7 +412,7 @@ curl -s \
   "https://espejknkeeayjnzyrejw.supabase.co/functions/v1/contractor-api/active-solicitations/a1b2c3d4-..."
 ```
 
-**Response shape:** same as a list row, plus `description`.
+**Response shape:** same as a list row, plus `description`. The `attachments[]` array is included here too, with freshly minted 1-hour signed `download_url`s on each call.
 
 ---
 
